@@ -21,10 +21,15 @@ class PretrainDataset(Dataset):
         self.samples = self.load_data(data_path)
 
     def load_data(self, path):
+        """
+        加载数据的函数，将json的数据转变为列表，按行进行返回
+        """
         samples = []
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, "r", encoding="utf-8") as f:
             for line_num, line in enumerate(f, 1):
-                data = json.loads(line.strip())
+                data = json.loads(
+                    line.strip()
+                )  # 一次读取一个json对象，也就是一个完整的数据
                 samples.append(data)
         return samples
 
@@ -36,17 +41,17 @@ class PretrainDataset(Dataset):
 
         # 构建输入文本
         encoding = self.tokenizer(
-            str(sample['text']),
+            str(sample["text"]),
             max_length=self.max_length,
-            padding='max_length',
+            padding="max_length",
             truncation=True,
-            return_tensors='pt'
+            return_tensors="pt",
         )
         input_ids = encoding.input_ids.squeeze()
-        loss_mask = (input_ids != self.tokenizer.pad_token_id)
+        loss_mask = input_ids != self.tokenizer.pad_token_id
 
         X = torch.tensor(input_ids[:-1], dtype=torch.long)
-        Y = torch.tensor(input_ids[1:], dtype=torch.long)
+        Y = torch.tensor(input_ids[1:], dtype=torch.long)  # 构建预测下一个词的监督信号
         loss_mask = torch.tensor(loss_mask[1:], dtype=torch.long)
         return X, Y, loss_mask
 
@@ -57,15 +62,19 @@ class SFTDataset(Dataset):
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.samples = self.load_data(jsonl_path)
-        self.bos_id = tokenizer(f'{tokenizer.bos_token}assistant', add_special_tokens=False).input_ids
-        self.eos_id = tokenizer(f'{tokenizer.eos_token}', add_special_tokens=False).input_ids
+        self.bos_id = tokenizer(
+            f"{tokenizer.bos_token}assistant", add_special_tokens=False
+        ).input_ids
+        self.eos_id = tokenizer(
+            f"{tokenizer.eos_token}", add_special_tokens=False
+        ).input_ids
 
     def __len__(self):
         return len(self.samples)
 
     def load_data(self, path):
         samples = []
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, "r", encoding="utf-8") as f:
             for line_num, line in enumerate(f, 1):
                 data = json.loads(line.strip())
                 samples.append(data)
@@ -73,26 +82,29 @@ class SFTDataset(Dataset):
 
     def _create_chat_prompt(self, cs):
         messages = cs.copy()
-        tools = cs[0]["functions"] if (cs and cs[0]["role"] == "system" and cs[0].get("functions")) else None
+        tools = (
+            cs[0]["functions"]
+            if (cs and cs[0]["role"] == "system" and cs[0].get("functions"))
+            else None
+        )
         return self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=False,
-            tools=tools
+            messages, tokenize=False, add_generation_prompt=False, tools=tools
         )
 
     def _generate_loss_mask(self, input_ids):
         loss_mask = [0] * len(input_ids)
         i = 0
         while i < len(input_ids):
-            if input_ids[i:i + len(self.bos_id)] == self.bos_id:
+            if input_ids[i : i + len(self.bos_id)] == self.bos_id:
                 start = i + len(self.bos_id)
                 end = start
                 while end < len(input_ids):
-                    if input_ids[end:end + len(self.eos_id)] == self.eos_id:
+                    if input_ids[end : end + len(self.eos_id)] == self.eos_id:
                         break
                     end += 1
-                for j in range(start + 1, min(end + len(self.eos_id) + 1, self.max_length)):
+                for j in range(
+                    start + 1, min(end + len(self.eos_id) + 1, self.max_length)
+                ):
                     loss_mask[j] = 1
                 i = end + len(self.eos_id) if end < len(input_ids) else len(input_ids)
             else:
@@ -102,8 +114,8 @@ class SFTDataset(Dataset):
     def __getitem__(self, index):
         sample = self.samples[index]
         # 构建对话提示
-        prompt = self._create_chat_prompt(sample['conversations'])
-        input_ids = self.tokenizer(prompt).input_ids[:self.max_length]
+        prompt = self._create_chat_prompt(sample["conversations"])
+        input_ids = self.tokenizer(prompt).input_ids[: self.max_length]
         input_ids += [self.tokenizer.pad_token_id] * (self.max_length - len(input_ids))
 
         # 生成动态损失掩码
@@ -129,10 +141,16 @@ class DPODataset(Dataset):
         super().__init__()
         self.tokenizer = tokenizer
         self.max_length = max_length
-        self.padding = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
-        self.bos_id = tokenizer(f'{tokenizer.bos_token}assistant', add_special_tokens=False).input_ids
-        self.eos_id = tokenizer(f'{tokenizer.eos_token}', add_special_tokens=False).input_ids
-        with open(file_path, 'r', encoding='utf-8') as f:
+        self.padding = (
+            tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
+        )
+        self.bos_id = tokenizer(
+            f"{tokenizer.bos_token}assistant", add_special_tokens=False
+        ).input_ids
+        self.eos_id = tokenizer(
+            f"{tokenizer.eos_token}", add_special_tokens=False
+        ).input_ids
+        with open(file_path, "r", encoding="utf-8") as f:
             self.data = []
             for line in f:
                 line = line.strip()
@@ -144,8 +162,8 @@ class DPODataset(Dataset):
 
     def __getitem__(self, index):
         item = self.data[index]
-        chosen = item['chosen']  # 是一个 list，里面包含若干 {role, content}
-        rejected = item['rejected']  # 同上
+        chosen = item["chosen"]  # 是一个 list，里面包含若干 {role, content}
+        rejected = item["rejected"]  # 同上
         chosen_prompt = self.tokenizer.apply_chat_template(
             chosen, tokenize=False, add_generation_prompt=False
         )
@@ -154,16 +172,22 @@ class DPODataset(Dataset):
             rejected, tokenize=False, add_generation_prompt=False
         )
         chosen_encoding = self.tokenizer(
-            chosen_prompt, truncation=True, max_length=self.max_length, padding='max_length'
+            chosen_prompt,
+            truncation=True,
+            max_length=self.max_length,
+            padding="max_length",
         )
         rejected_encoding = self.tokenizer(
-            rejected_prompt, truncation=True, max_length=self.max_length, padding='max_length'
+            rejected_prompt,
+            truncation=True,
+            max_length=self.max_length,
+            padding="max_length",
         )
 
-        chosen_input_ids = chosen_encoding['input_ids']
+        chosen_input_ids = chosen_encoding["input_ids"]
         chosen_loss_mask = self._generate_loss_mask(chosen_input_ids)
 
-        rejected_input_ids = rejected_encoding['input_ids']
+        rejected_input_ids = rejected_encoding["input_ids"]
         rejected_loss_mask = self._generate_loss_mask(rejected_input_ids)
         x_chosen = torch.tensor(chosen_input_ids[:-1], dtype=torch.long)
         y_chosen = torch.tensor(chosen_input_ids[1:], dtype=torch.long)
@@ -173,26 +197,28 @@ class DPODataset(Dataset):
         mask_rejected = torch.tensor(rejected_loss_mask[1:], dtype=torch.long)
 
         return {
-            'x_chosen': x_chosen,
-            'y_chosen': y_chosen,
-            'mask_chosen': mask_chosen,
-            'x_rejected': x_rejected,
-            'y_rejected': y_rejected,
-            'mask_rejected': mask_rejected
+            "x_chosen": x_chosen,
+            "y_chosen": y_chosen,
+            "mask_chosen": mask_chosen,
+            "x_rejected": x_rejected,
+            "y_rejected": y_rejected,
+            "mask_rejected": mask_rejected,
         }
 
     def _generate_loss_mask(self, input_ids):
         loss_mask = [0] * len(input_ids)
         i = 0
         while i < len(input_ids):
-            if input_ids[i:i + len(self.bos_id)] == self.bos_id:
+            if input_ids[i : i + len(self.bos_id)] == self.bos_id:
                 start = i + len(self.bos_id)
                 end = start
                 while end < len(input_ids):
-                    if input_ids[end:end + len(self.eos_id)] == self.eos_id:
+                    if input_ids[end : end + len(self.eos_id)] == self.eos_id:
                         break
                     end += 1
-                for j in range(start + 1, min(end + len(self.eos_id) + 1, self.max_length)):
+                for j in range(
+                    start + 1, min(end + len(self.eos_id) + 1, self.max_length)
+                ):
                     loss_mask[j] = 1
                 i = end + len(self.eos_id) if end < len(input_ids) else len(input_ids)
             else:
@@ -206,15 +232,19 @@ class RLAIFDataset(Dataset):
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.samples = self.load_data(jsonl_path)
-        self.bos_id = tokenizer(f'{tokenizer.bos_token}assistant', add_special_tokens=False).input_ids
-        self.eos_id = tokenizer(f'{tokenizer.eos_token}', add_special_tokens=False).input_ids
+        self.bos_id = tokenizer(
+            f"{tokenizer.bos_token}assistant", add_special_tokens=False
+        ).input_ids
+        self.eos_id = tokenizer(
+            f"{tokenizer.eos_token}", add_special_tokens=False
+        ).input_ids
 
     def __len__(self):
         return len(self.samples)
 
     def load_data(self, path):
         samples = []
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, "r", encoding="utf-8") as f:
             for line_num, line in enumerate(f, 1):
                 data = json.loads(line.strip())
                 samples.append(data)
@@ -223,26 +253,26 @@ class RLAIFDataset(Dataset):
     def _create_chat_prompt(self, conversations):
         """构建符合ChatML格式的对话"""
         messages = []
-        answer = ''
+        answer = ""
         for i, turn in enumerate(conversations):
-            role = 'user' if i % 2 == 0 else 'assistant'
-            messages.append({"role": role, "content": turn['content']})
-            answer = turn['content']
-        return self.tokenizer.apply_chat_template(
-            messages[:-1],
-            tokenize=False,
-            add_generation_prompt=True  # 这里需要True
-        ), answer
+            role = "user" if i % 2 == 0 else "assistant"
+            messages.append({"role": role, "content": turn["content"]})
+            answer = turn["content"]
+        return (
+            self.tokenizer.apply_chat_template(
+                messages[:-1],
+                tokenize=False,
+                add_generation_prompt=True,  # 这里需要True
+            ),
+            answer,
+        )
 
     def __getitem__(self, index):
         sample = self.samples[index]
         # 构建对话提示
-        prompt, answer = self._create_chat_prompt(sample['conversations'])
+        prompt, answer = self._create_chat_prompt(sample["conversations"])
 
-        return {
-            'prompt': prompt,
-            'answer': answer
-        }
+        return {"prompt": prompt, "answer": answer}
 
 
 if __name__ == "__main__":
